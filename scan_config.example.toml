@@ -1,0 +1,24 @@
+# Example scan configuration.
+#
+# Copy this file to scan_config.toml (in the same directory you run `python main.py`
+# from) to override the built-in defaults in config.py. Any setting you omit falls
+# back to its code default. Unknown keys are ignored with a warning, not an error.
+#
+# target_range / network_interface are NOT configurable here on purpose — those are
+# chosen via the interactive VM/Live mode menu, or --target in non-interactive mode.
+
+# Seconds to wait for ARP discovery replies.
+arp_timeout = 2.0
+
+# Whether scapy prints its own verbose ARP send/receive output.
+arp_verbose = false
+
+# Scans ports 1..N.
+number_of_ports_to_scan = 6001
+
+# Max concurrent threads in the TCP scan's thread pool.
+max_workers = 100
+
+# Stealth pacing: caps real connection attempts per second, regardless of max_workers.
+# Set to 0 to disable throttling entirely (scans as fast as max_workers allows).
+max_scans_per_second = 20.0

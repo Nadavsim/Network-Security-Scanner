@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Project-generated output (regenerated per run/session, not source)
+logs/
+scan_config.toml
+scan_*.json
+
+# Internal dev notes, not for the public repo
+CLAUDE.md
+
+# Editor/OS cruft
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
