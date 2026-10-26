@@ -61,8 +61,8 @@ one tries to behave like a tool you'd actually use during a pentest engagement:
 ## Installation
 
 ```bash
-git clone https://github.com/<your-username>/network-security-scanner.git
-cd network-security-scanner
+git clone https://github.com/Nadavsim/Network-Security-Scanner.git
+cd Network-Security-Scanner
 pip install -r requirements.txt
 ```
 
@@ -104,6 +104,137 @@ Benchmark the threaded vs. asyncio TCP scanners against each other:
 ```bash
 python benchmark_scan.py --quick   # fast sanity check
 python benchmark_scan.py           # full benchmark, a few minutes
+```
+
+## Architecture
+
+How the modules talk to each other, from the entry point down to the network, nmap,
+and the NVD API. Dotted lines are side relationships (config/log files, and the
+benchmark track that isn't wired into the app).
+
+```mermaid
+flowchart TD
+    USER(["User at terminal"])
+
+    subgraph ENTRY["Entry point"]
+        MAIN["main.py<br/>argparse flags<br/>is_valid_ipv4 check<br/>top-level Ctrl+C / PermissionError handling"]
+    end
+
+    subgraph APP["cli.py - ScannerApp (session state + rich output)"]
+        INIT["__init__<br/>setup_logging, load_scan_config,<br/>is_nmap_available"]
+        MENU["run: menu loop"]
+        SINGLE["run_single_target<br/>non-interactive"]
+        ARPH["handle_arp_discovery"]
+        TCPH["handle_tcp_scan"]
+        UDPH["handle_udp_scan"]
+        FULL["handle_full_workflow<br/>ARP then TCP"]
+        SHOW["show_scan_results<br/>rich Table"]
+        EXPH["handle_export_results"]
+        SCANHOST["_scan_host<br/>shared per-host pipeline"]
+    end
+
+    subgraph CORE["Support modules"]
+        CONFIG["config.py<br/>ScanConfig + load_scan_config"]
+        LOGSET["logging_setup.py<br/>setup_logging"]
+        MODELS["models.py<br/>Host dataclass"]
+    end
+
+    subgraph SCAN["network_scanner.py - scapy + sockets"]
+        ARP["arp_scan<br/>Layer 2 host discovery"]
+        TIMEOUT["calculate_adaptive_timeout"]
+        OSG["guess_os_from_ttl<br/>ICMP echo + TTL"]
+        TCP["tcp_scan<br/>shuffled ports, thread pool"]
+        RL["RateLimiter<br/>stealth pacing"]
+        UDP["udp_scan<br/>sequential, ICMP inference"]
+    end
+
+    subgraph SVC["service_detection.py"]
+        PI["protocol_inference"]
+        NMAPD["detect_protocols_with_nmap<br/>one nmap -sV call per port"]
+        BANNER["detect_protocols_with_banner_grab<br/>fallback if no nmap"]
+        CVE["lookup_cves<br/>cache only on HTTP 200"]
+        SORT["sort_cves_by_severity"]
+    end
+
+    EXP["export.py<br/>export_hosts_to_json"]
+
+    subgraph EXT["External systems and files"]
+        NET[("Target network / hosts")]
+        NMAPBIN[["system nmap binary"]]
+        NVD[["NVD CVE API v2.0"]]
+        TOML[/"scan_config.toml (optional)"/]
+        LOGF[/"logs/scan_timestamp.log"/]
+        JSONF[/"scan.json"/]
+    end
+
+    subgraph SIDE["Benchmark side-track - not wired into the app"]
+        ASYNC["network_scanner_async.py<br/>tcp_scan_async + AsyncRateLimiter"]
+        BENCH["benchmark_scan.py"]
+        REPORT[/"BENCHMARK_REPORT.md"/]
+    end
+
+    USER --> MAIN
+    MAIN -->|"--target IP"| SINGLE
+    MAIN -->|"no --target"| MENU
+    MAIN --> INIT
+
+    INIT --> CONFIG
+    INIT --> LOGSET
+    CONFIG -.->|"reads"| TOML
+    LOGSET -.->|"creates"| LOGF
+
+    MENU --> ARPH
+    MENU --> TCPH
+    MENU --> UDPH
+    MENU --> FULL
+    MENU --> SHOW
+    MENU --> EXPH
+    FULL --> ARPH
+    FULL --> TCPH
+
+    ARPH --> ARP
+    ARP -->|"ARP requests"| NET
+    ARP -->|"list of Host"| MODELS
+    ARPH --> SHOW
+
+    TCPH --> SCANHOST
+    SINGLE --> SCANHOST
+    SCANHOST --> TIMEOUT
+    SCANHOST --> OSG
+    SCANHOST --> TCP
+    TIMEOUT -->|"probe latency"| NET
+    OSG -->|"ICMP echo"| NET
+    TCP --> RL
+    RL -->|"paced connect attempts"| NET
+    TCP -->|"fills host.open_ports"| MODELS
+
+    UDPH --> UDP
+    UDP -->|"UDP probes"| NET
+    UDP -->|"fills udp_open_ports and udp_open_or_filtered_ports"| MODELS
+
+    TCPH -->|"user answers y"| PI
+    SINGLE -->|"--detect-services"| PI
+    PI -->|"nmap installed"| NMAPD
+    PI -->|"nmap missing"| BANNER
+    NMAPD --> NMAPBIN
+    NMAPBIN --> NET
+    BANNER -->|"raw socket read"| NET
+    PI -->|"product + version found"| CVE
+    CVE --> NVD
+    CVE --> SORT
+    SORT -->|"host.services port cves"| MODELS
+
+    EXPH --> EXP
+    SINGLE -->|"--export"| EXP
+    MODELS -->|"Host data"| EXP
+    EXP --> JSONF
+
+    ASYNC -.->|"compared against"| TCP
+    BENCH -.-> ASYNC
+    BENCH -.-> TCP
+    BENCH -.-> REPORT
+
+    CONFIG -.->|"ScanConfig passed into scans"| SCAN
 ```
 
 ## Project structure
